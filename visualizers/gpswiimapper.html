@@ -1,0 +1,239 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xmlns:v="urn:schemas-microsoft-com:vml">
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+<title> GPS Wii Mapper </title>
+<style type="text/css">
+<!--
+body {
+	font-family:Arial, Helvetica, sans-serif;
+	font-size:10pt;
+	color:#444;
+}
+#frm_upload, #tbl_upload, #btn, #sbm {
+	margin:0px;
+	padding:0px;
+}
+#tbl_upload {
+	border-top:solid 1px #aaa;
+	border-left:solid 1px #aaa;
+}
+#tbl_upload th, #tbl_upload td {
+	border-right:solid 1px #aaa;
+	border-bottom:solid 1px #aaa;
+	text-align:left;
+	vertical-align:top;
+}
+#tbl_upload th {
+	padding:3px 10px 0px 10px;
+	background-color:#f1f1f1;
+	font-weight:bold;
+}
+#tbl_upload td {
+	padding:3px;
+}
+.frmfld {
+	border:1px solid #aaa;
+	width:300px;
+}
+#btn, #sbm {
+	height:20px;
+	width:120px;
+	display:block;
+}
+#btn {
+	background-color:transparent;
+	border:none;
+	cursor:pointer;
+}
+#sbm {
+	border:solid 1px #aaa;
+	background:url(button.gif) repeat-x 0px 50%;
+}
+.warning {
+	color:#990000;
+	font-weight:bold;
+}
+#debugdiv { 
+    background-color: #ccc;
+    color: #330000;
+    border:1px solid #aaa;
+}
+-->
+</style>
+<script src="http://maps.google.com/maps?file=api&amp;v=2&amp;key=ABQIAAAACQjOJc5gYSwEjxBS6KpT3BQ2Q2jvRtN_rLoWUsbjaUjz6dBvBRTDU71629dhBHjqL4sYF-VNzADmTw"
+        type="text/javascript"></script>
+<script type="text/javascript">
+<!--
+  //
+  //  gpsjsmapper.html -- Map GPS data in NMEA format as a line on Google Maps
+  //
+  //  Yes, similar to gpsvisualizer.com, but simpler
+  //  and makes self-contained pages that can be saved since the
+  //  gps data is placed in a javascript data structure
+  //
+  //  2008, Tod E. Kurt, http://todbot.com/blog/ 
+  //
+-->
+
+var debug = true;
+
+// parsed gps data in javascript datastruct format
+var mypoints = null; 
+
+//
+function initialize() {
+  makeMap();
+}
+
+// 
+function makeMap() {
+  if (GBrowserIsCompatible()) {
+    var map = new GMap2(document.getElementById("map_canvas"));
+    map.setMapType(G_HYBRID_MAP);
+    map.addControl(new GSmallMapControl());
+    map.addControl(new GMapTypeControl());
+    
+    if( mypoints == null  ) {
+      map.setCenter(new GLatLng(34.14,-118.15), 12); // default
+    } else { 
+      var ps = mypoints; //.points;
+      var bounds = new GLatLngBounds();
+      var glls = new Array();
+      for( var i=0; i< ps.length; i++ ) {
+        var gll = new GLatLng( ps[i]['lat'], ps[i]['lon'] );
+        glls[glls.length] = gll;
+        bounds.extend( gll );
+      }
+      var polyline = new GPolyline( glls, "#ff00ff", 3, 0.8);
+      map.addOverlay(polyline);
+      map.setCenter( bounds.getCenter(), map.getBoundsZoomLevel(bounds));
+    }
+  }
+}
+
+// parse the GPS NMEA + Wii accelerometer |-delimited data
+// into a datastructure
+function parseData() {
+//var points = new Array(); // reset
+  var points = []; // reset
+  var d = document.dataform.gpsdata.value;
+  var lines = d.split(/\n/);
+  var dbg ='';
+  for( var i=0; i<lines.length; i++) {
+    var l = lines[i];
+    if(debug) logdebug("line:"+l);
+    if( l.match(/^\$GPRMC/) ) {  // it's a GMRMC line
+      var fields = l.split(/,/); // so split it into fields
+      if( fields[3].match(/(\d+)(\d\d)\.(\d+)/) )   // get lat
+        lat = parseInt(RegExp.$1) + (parseFloat(RegExp.$2+"."+RegExp.$3)/60);
+      if( fields[5].match(/(\d+)(\d\d)\.(\d+)/) )   // get lon
+        lon = parseInt(RegExp.$1) + (parseFloat(RegExp.$2+"."+RegExp.$3)/60);
+      if( fields[4] == 'S' ) lat = -lat;
+      if( fields[6] == 'W' ) lon = -lon;
+      points.push( {'lat':lat, 'lon':lon, 'time':fields[1]} );
+    }
+    else if( l.match(/^\|/) ) {  // it's a Wii data line
+      var vals = [];
+      var fields = l.split('|');
+      for( var j=1; j<fields.length; j++ ) {
+        var f = fields[j];
+        vals.push( {'x':parseInt(f.substring(0,2),16),
+                    'y':parseInt(f.substring(2,4),16),
+                    'z':parseInt(f.substring(4,6),16)} );
+      }
+      // analysis
+      var accx=0,accy=0,accz=0;
+      for( var j=0; j<vals.length; j++) {
+        if( vals[j].x !=0 )
+          accx += vals[j].x;
+      }
+      if( vals.length!=0) accx /= vals.length;
+      if( points.length != null )
+        points[points.length-1].accx = accx; //edit the last point
+    }
+  } // for lines
+
+  var datastatsdiv = document.getElementById("datastats");
+  datastatsdiv.innerHTML = "Data stats: <br/>";
+  datastatsdiv.innerHTML += "Number of lines:"+lines.length+"<br/>";
+  datastatsdiv.innerHTML += "Number of GPS points:"+points.length+"<br/>";
+
+  if( debug ) {
+    dbg += "dbg:\n";
+    for( var i=0; i<points.length; i++) 
+      dbg +="{"+i+":"+points[i].lat+","+points[i].lon+":"+points[i].time+
+        ":"+points[i].accx+"}\n";
+    //alert(dbg);
+    logdebug(dbg);
+  }
+
+  mypoints = points;
+}
+
+function logdebug(str) {
+  document.getElementById("debugdiv").innerHTML += "<pre>"+str+"</pre>";
+}
+
+//
+function updateMap() { 
+  parseData();
+  makeMap();
+}
+
+</script>
+</head>
+
+<body onload="initialize()" onunload="GUnload()">
+  
+  <h2>GPS + Wii Data Mapper </h2> 
+  <br/>  
+  
+  <form name="dataform" action="javascript:updateMap()">
+    Data to graph:<br/>
+    <textarea name="gpsdata" cols=80 rows=10 onclick="javascript:select()"/>
+    paste in GPSWii data here
+  </textarea>
+  <br/>
+  <input type="submit" name="map it" label="map it"/>
+</form>
+
+<hr/>
+
+<!-- warning goes here-->
+
+<!--
+    <form action="" method="post" enctype="multipart/form-data" name="frm_upload" id="frm_upload">
+      <table border="0" cellspacing="0" cellpadding="0" id="tbl_upload">
+        <tr>
+          <th scope="row"><label for="frmfile">File:</label></th>
+          <td>
+            <input type="hidden" name="MAX_FILE_SIZE" value="<?php echo MAX_FILE_SIZE; ?>" />
+            <input name="frmfile" type="file" id="frmfile" size="30" /></td>
+          <td>
+            <label for="btn" id="sbm">
+              <input type="submit" name="btn" id="btn" value="Upload" />
+            </label>
+          </td>
+        </tr>
+      </table>
+    </form>
+    -->
+
+<br/>
+
+<!-- info about upload goes here -->
+<div id="datastats"></div>
+
+<div id="map_canvas" style="width: 500px; height: 300px"></div>
+<div id="message"></div>
+<div id="debugdiv">
+  hello
+</div>
+
+</body>
+</html>
+
+</body>
+</html>
